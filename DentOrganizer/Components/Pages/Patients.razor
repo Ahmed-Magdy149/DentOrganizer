@@ -1,0 +1,91 @@
+@page "/patients"
+@inject PatientService PatientSvc
+@inject NavigationManager Nav
+
+<PageTitle>Patients</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Patients</h1>
+        <div class="subtitle">@rows.Count patient(s)</div>
+    </div>
+    <div class="toolbar">
+        <input class="form-control" style="min-width: 260px" placeholder="Search by name or phone…"
+               value="@search" @oninput="OnSearchInput" />
+        <button class="btn btn-primary" @onclick="() => showForm = true">+ New patient</button>
+    </div>
+</div>
+
+<div class="card-box">
+    @if (loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (rows.Count == 0)
+    {
+        <div class="empty-state">
+            @(string.IsNullOrWhiteSpace(search) ? "No patients yet." : "No patients match your search.")
+        </div>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="table-clean">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Phone</th>
+                        <th>Age</th>
+                        <th class="num">Sessions</th>
+                        <th>Last visit</th>
+                        <th>Next appointment</th>
+                        <th class="num">Balance due</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in rows)
+                    {
+                        <tr style="cursor: pointer" @onclick="@(() => Nav.NavigateTo($"patients/{r.Patient.Id}"))">
+                            <td>
+                                <span class="fw-semibold">@r.Patient.FullName</span>
+                                @if (!string.IsNullOrWhiteSpace(r.Patient.MedicalHistory))
+                                {
+                                    <span class="badge-soft badge-low ms-1" title="@r.Patient.MedicalHistory">Medical alert</span>
+                                }
+                            </td>
+                            <td>@r.Patient.Phone</td>
+                            <td>@r.Patient.Age</td>
+                            <td class="num">@r.SessionsCount</td>
+                            <td>@(r.LastVisit is { } lv ? Fmt.ShortDate(lv) : "—")</td>
+                            <td>@(r.NextAppointment is { } na ? Fmt.ShortDate(na) : "—")</td>
+                            <td class="num @(r.Balance > 0 ? "text-danger-strong" : "")">@(r.Balance != 0 ? Fmt.Money(r.Balance) : "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+<PatientFormModal @bind-Show="showForm" OnSaved="@(p => Nav.NavigateTo($"patients/{p.Id}"))" />
+
+@code {
+    private List<PatientRow> rows = [];
+    private string search = "";
+    private bool loading = true;
+    private bool showForm;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task OnSearchInput(ChangeEventArgs e)
+    {
+        search = e.Value?.ToString() ?? "";
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        rows = await PatientSvc.GetListAsync(search);
+        loading = false;
+    }
+}

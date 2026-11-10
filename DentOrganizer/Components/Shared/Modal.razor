@@ -1,0 +1,29 @@
+@if (Show)
+{
+    <div class="modal-overlay" @onclick="Close">
+        <div class="modal-panel @(Large ? "lg" : "")" @onclick:stopPropagation="true">
+            <div class="modal-panel-header">
+                <h5>@Title</h5>
+                <button type="button" class="btn-close" aria-label="Close" @onclick="Close"></button>
+            </div>
+            <div class="modal-panel-body">
+                @ChildContent
+            </div>
+            @if (Footer is not null)
+            {
+                <div class="modal-panel-footer">@Footer</div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Show { get; set; }
+    [Parameter] public EventCallback<bool> ShowChanged { get; set; }
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public bool Large { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public RenderFragment? Footer { get; set; }
+
+    private Task Close() => ShowChanged.InvokeAsync(false);
+}

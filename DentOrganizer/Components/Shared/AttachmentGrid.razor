@@ -1,0 +1,66 @@
+@inject AttachmentService Files
+@inject DialogService Dialog
+
+<div class="attach-grid">
+    @foreach (var a in Attachments)
+    {
+        <div class="attach-tile">
+            <button type="button" class="attach-thumb" title="Open" @onclick="() => OpenAsync(a)">
+                @if (thumbs.TryGetValue(a.Id, out var url) && url is not null)
+                {
+                    <img src="@url" alt="@a.OriginalFileName" />
+                }
+                else
+                {
+                    <span class="file-ext">@Ext(a)</span>
+                }
+            </button>
+            <div class="attach-info">
+                <div class="name" title="@a.OriginalFileName">@a.OriginalFileName</div>
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="badge-soft">@Fmt.KindText(a.Kind)</span>
+                    <span class="small-muted">@Fmt.FileSize(a.SizeBytes)</span>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(a.Description))
+                {
+                    <div class="small-muted mt-1">@a.Description</div>
+                }
+                @if (OnDelete.HasDelegate)
+                {
+                    <button class="btn btn-sm btn-link text-danger p-0 mt-1" @onclick="() => OnDelete.InvokeAsync(a)">Delete</button>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<SessionAttachment> Attachments { get; set; } = [];
+    [Parameter] public EventCallback<SessionAttachment> OnDelete { get; set; }
+
+    private readonly Dictionary<int, string?> thumbs = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        foreach (var a in Attachments.Where(a => !thumbs.ContainsKey(a.Id)))
+            thumbs[a.Id] = await Files.GetThumbnailDataUrlAsync(a);
+    }
+
+    private static string Ext(SessionAttachment a)
+    {
+        var ext = Path.GetExtension(a.OriginalFileName).TrimStart('.').ToUpperInvariant();
+        return string.IsNullOrEmpty(ext) ? "FILE" : ext;
+    }
+
+    private async Task OpenAsync(SessionAttachment a)
+    {
+        try
+        {
+            await Files.OpenAsync(a);
+        }
+        catch (Exception ex)
+        {
+            await Dialog.AlertAsync("Cannot open file", ex.Message);
+        }
+    }
+}

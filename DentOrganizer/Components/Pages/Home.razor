@@ -1,0 +1,135 @@
+﻿@page "/"
+@inject AppointmentService Appointments
+@inject SessionService Sessions
+@inject InventoryService Inventory
+
+<PageTitle>Dashboard</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Today</h1>
+        <div class="subtitle">@Fmt.Date(today)</div>
+    </div>
+    <div class="toolbar">
+        <a class="btn btn-outline-primary" href="patients">Find patient</a>
+        <a class="btn btn-primary" href="appointments?new=1">+ New appointment</a>
+    </div>
+</div>
+
+@if (loading)
+{
+    <p class="muted">Loading…</p>
+}
+else
+{
+    <div class="stat-grid">
+        <div class="stat">
+            <div class="stat-label">Appointments today</div>
+            <div class="stat-value">@appointments.Count(a => a.Status != AppointmentStatus.Cancelled)</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Waiting / scheduled</div>
+            <div class="stat-value">@appointments.Count(a => a.Status == AppointmentStatus.Scheduled)</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Sessions done</div>
+            <div class="stat-value">@sessions.Count</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Fees today</div>
+            <div class="stat-value">@Fmt.Money(sessions.Sum(s => s.Fee))</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Collected today</div>
+            <div class="stat-value positive">@Fmt.Money(sessions.Sum(s => s.AmountPaid))</div>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-xl-7">
+            <div class="card-box">
+                <h2>Today's appointments <a class="small fw-normal" href="appointments">Open calendar →</a></h2>
+                @if (appointments.Count == 0)
+                {
+                    <div class="empty-state">No appointments today.</div>
+                }
+                else
+                {
+                    <div class="table-wrap">
+                        <table class="table-clean">
+                            <tbody>
+                                @foreach (var a in appointments)
+                                {
+                                    <tr class="@(a.Status is AppointmentStatus.Cancelled or AppointmentStatus.NoShow ? "row-muted" : "")">
+                                        <td class="time-cell">@Fmt.Time(a.StartTime)</td>
+                                        <td>
+                                            <a href="patients/@a.PatientId" class="fw-semibold">@a.Patient?.FullName</a>
+                                            <div class="small-muted">@a.Reason</div>
+                                        </td>
+                                        <td><span class="badge-soft @Fmt.StatusClass(a.Status)">@Fmt.StatusText(a.Status)</span></td>
+                                        <td class="actions">
+                                            @if (a.Status == AppointmentStatus.Scheduled)
+                                            {
+                                                <a class="btn btn-sm btn-primary" href="sessions/new/@a.PatientId?appointmentId=@a.Id">Start session</a>
+                                            }
+                                            else if (a.Session is not null)
+                                            {
+                                                <a class="btn btn-sm btn-outline-primary" href="sessions/@a.Session.Id">View session</a>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="col-xl-5">
+            <div class="card-box">
+                <h2>Low stock <a class="small fw-normal" href="inventory">Inventory →</a></h2>
+                @if (lowStock.Count == 0)
+                {
+                    <div class="empty-state">All items are above their minimum quantity.</div>
+                }
+                else
+                {
+                    <table class="table-clean">
+                        <tbody>
+                            @foreach (var i in lowStock)
+                            {
+                                <tr>
+                                    <td>
+                                        <div class="fw-semibold">@i.Name</div>
+                                        <div class="small-muted">@i.Category</div>
+                                    </td>
+                                    <td class="num">
+                                        <span class="badge-soft badge-low">@Fmt.Qty(i.Quantity) @i.Unit</span>
+                                        <div class="small-muted">min @Fmt.Qty(i.MinQuantity)</div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private readonly DateOnly today = DateOnly.FromDateTime(DateTime.Today);
+    private List<Appointment> appointments = [];
+    private List<Session> sessions = [];
+    private List<InventoryItem> lowStock = [];
+    private bool loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        appointments = await Appointments.GetDayAsync(today);
+        sessions = await Sessions.GetForRangeAsync(today, today);
+        lowStock = await Inventory.GetLowStockAsync();
+        loading = false;
+    }
+}

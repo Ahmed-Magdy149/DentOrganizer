@@ -1,0 +1,195 @@
+@page "/appointments"
+@inject AppointmentService AppointmentSvc
+@inject PatientService PatientSvc
+@inject DialogService Dialog
+@inject NavigationManager Nav
+
+<PageTitle>Appointments</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Appointments</h1>
+        <div class="subtitle">@Fmt.Date(selectedDate)</div>
+    </div>
+    <div class="toolbar">
+        <button class="btn btn-light btn-icon" title="Previous day" @onclick="() => GoToAsync(selectedDate.AddDays(-1))">‹</button>
+        <input type="date" class="form-control" style="width: auto" @bind="selectedDate" @bind:after="LoadAsync" />
+        <button class="btn btn-light btn-icon" title="Next day" @onclick="() => GoToAsync(selectedDate.AddDays(1))">›</button>
+        <button class="btn btn-light" @onclick="() => GoToAsync(today)">Today</button>
+        <button class="btn btn-primary" @onclick="OpenNew">+ New appointment</button>
+    </div>
+</div>
+
+<div class="day-strip">
+    @for (var i = 0; i < 7; i++)
+    {
+        var day = weekStart.AddDays(i);
+        counts.TryGetValue(day, out var c);
+        <button class="@(day == selectedDate ? "selected" : "") @(day == today ? "today" : "")" @onclick="() => GoToAsync(day)">
+            <div class="dname">@day.ToString("ddd")</div>
+            <div class="dnum">@day.Day</div>
+            <div class="dcount">@(c == 0 ? "—" : $"{c} appt")</div>
+        </button>
+    }
+</div>
+
+<div class="card-box">
+    @if (loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (items.Count == 0)
+    {
+        <div class="empty-state">
+            No appointments on this day.<br />
+            <button class="btn btn-primary mt-2" @onclick="OpenNew">Book an appointment</button>
+        </div>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="table-clean">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Patient</th>
+                        <th>Reason</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var a in items)
+                    {
+                        var inactive = a.Status is AppointmentStatus.Cancelled or AppointmentStatus.NoShow;
+                        <tr class="@(inactive ? "row-muted" : "")">
+                            <td class="time-cell">
+                                @Fmt.Time(a.StartTime)
+                                <span class="end">to @Fmt.Time(a.EndTime)</span>
+                            </td>
+                            <td>
+                                <a href="patients/@a.PatientId" class="fw-semibold">@a.Patient?.FullName</a>
+                                <div class="small-muted">@a.Patient?.Phone</div>
+                            </td>
+                            <td>
+                                @a.Reason
+                                @if (!string.IsNullOrWhiteSpace(a.Notes))
+                                {
+                                    <div class="small-muted">@a.Notes</div>
+                                }
+                            </td>
+                            <td><span class="badge-soft @Fmt.StatusClass(a.Status)">@Fmt.StatusText(a.Status)</span></td>
+                            <td class="actions">
+                                @switch (a.Status)
+                                {
+                                    case AppointmentStatus.Scheduled:
+                                        <a class="btn btn-sm btn-primary" href="sessions/new/@a.PatientId?appointmentId=@a.Id">Start session</a>
+                                        <button class="btn btn-sm btn-light" @onclick="() => OpenEdit(a)">Edit</button>
+                                        <button class="btn btn-sm btn-light" @onclick="() => SetStatusAsync(a, AppointmentStatus.NoShow)">No-show</button>
+                                        <button class="btn btn-sm btn-light text-danger" @onclick="() => SetStatusAsync(a, AppointmentStatus.Cancelled)">Cancel</button>
+                                        break;
+                                    case AppointmentStatus.Completed:
+                                        @if (a.Session is not null)
+                                        {
+                                            <a class="btn btn-sm btn-outline-primary" href="sessions/@a.Session.Id">View session</a>
+                                        }
+                                        break;
+                                    default:
+                                        <button class="btn btn-sm btn-light" @onclick="() => SetStatusAsync(a, AppointmentStatus.Scheduled)">Restore</button>
+                                        <button class="btn btn-sm btn-light text-danger" @onclick="() => DeleteAsync(a)">Delete</button>
+                                        break;
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+<AppointmentFormModal @bind-Show="showForm" Appointment="editing" DefaultDate="selectedDate"
+                      FixedPatient="fixedPatient" OnSaved="OnSavedAsync" />
+
+@code {
+    [SupplyParameterFromQuery] public string? Date { get; set; }
+    [SupplyParameterFromQuery(Name = "new")] public int? OpenNewForm { get; set; }
+    [SupplyParameterFromQuery] public int? PatientId { get; set; }
+
+    private readonly DateOnly today = DateOnly.FromDateTime(DateTime.Today);
+    private DateOnly selectedDate;
+    private DateOnly weekStart;
+    private List<Appointment> items = [];
+    private Dictionary<DateOnly, int> counts = [];
+    private bool loading = true;
+
+    private bool showForm;
+    private Appointment? editing;
+    private Patient? fixedPatient;
+
+    protected override async Task OnInitializedAsync()
+    {
+        selectedDate = DateOnly.TryParse(Date, out var d) ? d : today;
+        await LoadAsync();
+
+        if (OpenNewForm == 1)
+        {
+            fixedPatient = PatientId is int pid ? await PatientSvc.GetAsync(pid) : null;
+            editing = null;
+            showForm = true;
+        }
+    }
+
+    private async Task GoToAsync(DateOnly date)
+    {
+        selectedDate = date;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        // Week starts on Saturday.
+        weekStart = selectedDate.AddDays(-(((int)selectedDate.DayOfWeek + 1) % 7));
+        items = await AppointmentSvc.GetDayAsync(selectedDate);
+        counts = await AppointmentSvc.GetCountsAsync(weekStart, weekStart.AddDays(6));
+        loading = false;
+    }
+
+    private void OpenNew()
+    {
+        editing = null;
+        fixedPatient = null;
+        showForm = true;
+    }
+
+    private void OpenEdit(Appointment a)
+    {
+        editing = a;
+        fixedPatient = null;
+        showForm = true;
+    }
+
+    private async Task OnSavedAsync(Appointment saved)
+    {
+        selectedDate = saved.Date;
+        await LoadAsync();
+    }
+
+    private async Task SetStatusAsync(Appointment a, AppointmentStatus status)
+    {
+        if (status == AppointmentStatus.Cancelled &&
+            !await Dialog.ConfirmAsync("Cancel appointment", $"Cancel the appointment of {a.Patient?.FullName} at {Fmt.Time(a.StartTime)}?"))
+            return;
+        await AppointmentSvc.SetStatusAsync(a.Id, status);
+        await LoadAsync();
+    }
+
+    private async Task DeleteAsync(Appointment a)
+    {
+        if (!await Dialog.ConfirmAsync("Delete appointment", $"Delete this appointment of {a.Patient?.FullName} permanently?"))
+            return;
+        await AppointmentSvc.DeleteAsync(a.Id);
+        await LoadAsync();
+    }
+}

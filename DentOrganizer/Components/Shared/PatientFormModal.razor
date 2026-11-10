@@ -1,0 +1,111 @@
+@inject PatientService Patients
+
+<Modal Show="Show" ShowChanged="ShowChanged" Title="@(model.Id == 0 ? "New patient" : "Edit patient")" Large="true">
+    <ChildContent>
+        @if (error is not null)
+        {
+            <div class="alert alert-danger py-2">@error</div>
+        }
+        <div class="row g-3">
+            <div class="col-md-8">
+                <label class="form-label">Full name *</label>
+                <input class="form-control" @bind="model.FullName" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Phone</label>
+                <input class="form-control" type="tel" @bind="model.Phone" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Gender</label>
+                <select class="form-select" @bind="model.Gender">
+                    <option value="@Gender.Unspecified">—</option>
+                    <option value="@Gender.Male">Male</option>
+                    <option value="@Gender.Female">Female</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Date of birth</label>
+                <input class="form-control" type="date" @bind="model.DateOfBirth" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Address</label>
+                <input class="form-control" @bind="model.Address" />
+            </div>
+            <div class="col-12">
+                <label class="form-label">Medical history <span class="small-muted">(allergies, chronic diseases, medications, pregnancy…)</span></label>
+                <textarea class="form-control" rows="3" @bind="model.MedicalHistory"></textarea>
+            </div>
+            <div class="col-12">
+                <label class="form-label">Notes</label>
+                <textarea class="form-control" rows="2" @bind="model.Notes"></textarea>
+            </div>
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-light" @onclick="() => ShowChanged.InvokeAsync(false)">Cancel</button>
+        <button class="btn btn-primary" disabled="@saving" @onclick="SaveAsync">Save</button>
+    </Footer>
+</Modal>
+
+@code {
+    [Parameter] public bool Show { get; set; }
+    [Parameter] public EventCallback<bool> ShowChanged { get; set; }
+
+    /// <summary>Patient to edit; null for a new one.</summary>
+    [Parameter] public Patient? Patient { get; set; }
+
+    [Parameter] public EventCallback<Patient> OnSaved { get; set; }
+
+    private Patient model = new();
+    private bool wasShown;
+    private bool saving;
+    private string? error;
+
+    protected override void OnParametersSet()
+    {
+        // Take a fresh copy each time the modal opens so Cancel discards edits.
+        if (Show && !wasShown)
+        {
+            error = null;
+            model = Patient is null
+                ? new Patient()
+                : new Patient
+                {
+                    Id = Patient.Id,
+                    FullName = Patient.FullName,
+                    Phone = Patient.Phone,
+                    Gender = Patient.Gender,
+                    DateOfBirth = Patient.DateOfBirth,
+                    Address = Patient.Address,
+                    MedicalHistory = Patient.MedicalHistory,
+                    Notes = Patient.Notes,
+                    CreatedAt = Patient.CreatedAt,
+                };
+        }
+        wasShown = Show;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(model.FullName))
+        {
+            error = "Please enter the patient's name.";
+            return;
+        }
+        saving = true;
+        try
+        {
+            var saved = await Patients.SaveAsync(model);
+            await ShowChanged.InvokeAsync(false);
+            await OnSaved.InvokeAsync(saved);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+}

@@ -1,0 +1,201 @@
+@inject PatientService Patients
+@inject AppointmentService Appointments
+@inject DialogService Dialog
+
+<Modal Show="Show" ShowChanged="ShowChanged" Title="@(model.Id == 0 ? "New appointment" : "Edit appointment")">
+    <ChildContent>
+        @if (error is not null)
+        {
+            <div class="alert alert-danger py-2">@error</div>
+        }
+
+        <div class="mb-3">
+            <label class="form-label d-block">Patient *</label>
+            @if (model.Id != 0 || FixedPatient is not null)
+            {
+                <div class="fw-semibold">@selectedPatient?.FullName <span class="small-muted">@selectedPatient?.Phone</span></div>
+            }
+            else
+            {
+                <div class="segmented mb-2">
+                    <button type="button" class="@(newPatientMode ? "" : "active")" @onclick="() => newPatientMode = false">Existing patient</button>
+                    <button type="button" class="@(newPatientMode ? "active" : "")" @onclick="() => newPatientMode = true">New patient</button>
+                </div>
+
+                @if (newPatientMode)
+                {
+                    <div class="row g-2">
+                        <div class="col-7"><input class="form-control" placeholder="Full name" @bind="newName" /></div>
+                        <div class="col-5"><input class="form-control" placeholder="Phone" type="tel" @bind="newPhone" /></div>
+                    </div>
+                }
+                else
+                {
+                    <input class="form-control" placeholder="Search by name or phone…" value="@search"
+                           @oninput="OnSearchInput" />
+                    <div class="pick-list">
+                        @foreach (var p in matches)
+                        {
+                            <button type="button" class="@(selectedPatient?.Id == p.Id ? "selected" : "")" @onclick="() => selectedPatient = p">
+                                <span>@p.FullName</span><span class="small-muted">@p.Phone</span>
+                            </button>
+                        }
+                        @if (matches.Count == 0)
+                        {
+                            <div class="small-muted p-2">No patients found. Use “New patient”.</div>
+                        }
+                    </div>
+                }
+            }
+        </div>
+
+        <div class="row g-3">
+            <div class="col-sm-5">
+                <label class="form-label">Date</label>
+                <input class="form-control" type="date" @bind="model.Date" />
+            </div>
+            <div class="col-sm-4">
+                <label class="form-label">Time</label>
+                <input class="form-control" type="time" step="300" @bind="model.StartTime" />
+            </div>
+            <div class="col-sm-3">
+                <label class="form-label">Duration</label>
+                <select class="form-select" @bind="model.DurationMinutes">
+                    @foreach (var m in durations)
+                    {
+                        <option value="@m">@m min</option>
+                    }
+                </select>
+            </div>
+            <div class="col-12">
+                <label class="form-label">Reason</label>
+                <input class="form-control" list="procedure-list" @bind="model.Reason" placeholder="e.g. Root canal treatment" />
+                <datalist id="procedure-list">
+                    @foreach (var p in Fmt.CommonProcedures)
+                    {
+                        <option value="@p"></option>
+                    }
+                </datalist>
+            </div>
+            <div class="col-12">
+                <label class="form-label">Notes</label>
+                <textarea class="form-control" rows="2" @bind="model.Notes"></textarea>
+            </div>
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-light" @onclick="() => ShowChanged.InvokeAsync(false)">Cancel</button>
+        <button class="btn btn-primary" disabled="@saving" @onclick="SaveAsync">Save</button>
+    </Footer>
+</Modal>
+
+@code {
+    [Parameter] public bool Show { get; set; }
+    [Parameter] public EventCallback<bool> ShowChanged { get; set; }
+
+    /// <summary>Appointment to edit; null for a new one.</summary>
+    [Parameter] public Appointment? Appointment { get; set; }
+
+    /// <summary>Default date for new appointments.</summary>
+    [Parameter] public DateOnly DefaultDate { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+
+    /// <summary>When set, the new appointment is for this patient (no picker).</summary>
+    [Parameter] public Patient? FixedPatient { get; set; }
+
+    [Parameter] public EventCallback<Appointment> OnSaved { get; set; }
+
+    private static readonly int[] durations = [15, 30, 45, 60, 90, 120, 180];
+
+    private Appointment model = new();
+    private Patient? selectedPatient;
+    private List<Patient> matches = [];
+    private string search = "";
+    private bool newPatientMode;
+    private string? newName;
+    private string? newPhone;
+    private bool wasShown;
+    private bool saving;
+    private string? error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Show && !wasShown)
+        {
+            wasShown = true;
+            error = null;
+            search = "";
+            newPatientMode = false;
+            newName = newPhone = null;
+
+            if (Appointment is { } a)
+            {
+                model = new Appointment
+                {
+                    Id = a.Id, PatientId = a.PatientId, Date = a.Date, StartTime = a.StartTime,
+                    DurationMinutes = a.DurationMinutes, Reason = a.Reason, Status = a.Status,
+                    Notes = a.Notes, CreatedAt = a.CreatedAt,
+                };
+                selectedPatient = a.Patient ?? await Patients.GetAsync(a.PatientId);
+            }
+            else
+            {
+                var now = DateTime.Now;
+                var nextSlot = new TimeOnly(now.Hour, 0).AddHours(1);
+                model = new Appointment { Date = DefaultDate, StartTime = nextSlot, DurationMinutes = 30 };
+                selectedPatient = FixedPatient;
+                matches = await Patients.SearchAsync(null);
+            }
+        }
+        wasShown = Show;
+    }
+
+    private async Task OnSearchInput(ChangeEventArgs e)
+    {
+        search = e.Value?.ToString() ?? "";
+        matches = await Patients.SearchAsync(search);
+    }
+
+    private async Task SaveAsync()
+    {
+        error = null;
+        saving = true;
+        try
+        {
+            if (model.Id == 0 && FixedPatient is null && newPatientMode)
+            {
+                if (string.IsNullOrWhiteSpace(newName)) { error = "Please enter the new patient's name."; return; }
+            }
+            else if (selectedPatient is null)
+            {
+                error = "Please choose a patient.";
+                return;
+            }
+
+            var overlaps = await Appointments.GetOverlapsAsync(model.Date, model.StartTime, model.DurationMinutes, model.Id);
+            if (overlaps.Count > 0)
+            {
+                var list = string.Join("\n", overlaps.Select(o => $"• {Fmt.Time(o.StartTime)} – {Fmt.Time(o.EndTime)}  {o.Patient?.FullName}"));
+                if (!await Dialog.ConfirmAsync("Time overlap", $"This time overlaps with:\n{list}\n\nSave anyway?", "Save anyway", "Go back"))
+                    return;
+            }
+
+            if (model.Id == 0 && FixedPatient is null && newPatientMode)
+            {
+                selectedPatient = await Patients.SaveAsync(new Patient { FullName = newName!, Phone = newPhone });
+            }
+
+            model.PatientId = selectedPatient!.Id;
+            await Appointments.SaveAsync(model);
+            await ShowChanged.InvokeAsync(false);
+            await OnSaved.InvokeAsync(model);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+}

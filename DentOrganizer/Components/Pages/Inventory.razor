@@ -1,0 +1,266 @@
+@page "/inventory"
+@inject InventoryService InventorySvc
+@inject DialogService Dialog
+
+<PageTitle>Inventory</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Inventory</h1>
+        <div class="subtitle">@items.Count(i => !i.IsArchived) items · stock value @Fmt.Money(items.Where(i => !i.IsArchived).Sum(i => i.StockValue))</div>
+    </div>
+    <div class="toolbar">
+        <input class="form-control" style="min-width: 220px" placeholder="Search items…" @bind="search" @bind:event="oninput" />
+        <button class="btn btn-primary" @onclick="OpenNew">+ New item</button>
+    </div>
+</div>
+
+<div class="toolbar mb-3">
+    <div class="segmented">
+        <button class="@(category is null ? "active" : "")" @onclick="() => category = null">All</button>
+        @foreach (var c in Enum.GetValues<ItemCategory>())
+        {
+            <button class="@(category == c ? "active" : "")" @onclick="() => category = c">@c</button>
+        }
+    </div>
+    <div class="form-check ms-2">
+        <input class="form-check-input" type="checkbox" id="lowOnly" @bind="lowOnly" />
+        <label class="form-check-label" for="lowOnly">Low stock only (@items.Count(i => i.IsLowStock))</label>
+    </div>
+    <div class="form-check ms-2">
+        <input class="form-check-input" type="checkbox" id="archived" @bind="showArchived" @bind:after="LoadAsync" />
+        <label class="form-check-label" for="archived">Show archived</label>
+    </div>
+</div>
+
+<div class="card-box">
+    @if (loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (Filtered.Count == 0)
+    {
+        <div class="empty-state">
+            @(items.Count == 0 ? "No items yet. Add your anesthesia, teeth, veneers, filling materials and consumables." : "No items match.")
+        </div>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="table-clean">
+                <thead>
+                    <tr>
+                        <th>Item</th>
+                        <th>Category</th>
+                        <th class="num">In stock</th>
+                        <th class="num">Min</th>
+                        <th class="num">Unit cost</th>
+                        <th class="num">Stock value</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var i in Filtered)
+                    {
+                        <tr class="@(i.IsArchived ? "row-muted" : i.IsLowStock ? "row-warning" : "")">
+                            <td>
+                                <span class="fw-semibold">@i.Name</span>
+                                @if (i.IsArchived) { <span class="badge-soft ms-1">Archived</span> }
+                                @if (!string.IsNullOrWhiteSpace(i.Notes)) { <div class="small-muted">@i.Notes</div> }
+                            </td>
+                            <td>@i.Category</td>
+                            <td class="num">
+                                <span class="badge-soft @(i.IsLowStock ? "badge-low" : "badge-ok")">@Fmt.Qty(i.Quantity) @i.Unit</span>
+                            </td>
+                            <td class="num">@Fmt.Qty(i.MinQuantity)</td>
+                            <td class="num">@Fmt.Money(i.UnitCost)</td>
+                            <td class="num">@Fmt.Money(i.StockValue)</td>
+                            <td class="actions">
+                                @if (i.IsArchived)
+                                {
+                                    <button class="btn btn-sm btn-light" @onclick="() => UnarchiveAsync(i)">Restore</button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenRestock(i)">+ Restock</button>
+                                    <button class="btn btn-sm btn-light" @onclick="() => OpenEdit(i)">Edit</button>
+                                    <button class="btn btn-sm btn-light text-danger" @onclick="() => DeleteAsync(i)">Delete</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@* ---------- Add / edit item ---------- *@
+<Modal @bind-Show="showForm" Title="@(form.Id == 0 ? "New item" : "Edit item")">
+    <ChildContent>
+        @if (formError is not null) { <div class="alert alert-danger py-2">@formError</div> }
+        <div class="row g-3">
+            <div class="col-12">
+                <label class="form-label">Name *</label>
+                <input class="form-control" @bind="form.Name" placeholder="e.g. Articaine 4% 1:100,000" />
+            </div>
+            <div class="col-sm-6">
+                <label class="form-label">Category</label>
+                <select class="form-select" @bind="form.Category">
+                    @foreach (var c in Enum.GetValues<ItemCategory>())
+                    {
+                        <option value="@c">@c</option>
+                    }
+                </select>
+            </div>
+            <div class="col-sm-6">
+                <label class="form-label">Unit</label>
+                <input class="form-control" list="unit-list" @bind="form.Unit" />
+                <datalist id="unit-list">
+                    @foreach (var u in Fmt.CommonUnits) { <option value="@u"></option> }
+                </datalist>
+            </div>
+            <div class="col-sm-4">
+                <label class="form-label">Quantity in stock</label>
+                <input class="form-control" type="number" min="0" step="any" @bind="form.Quantity" />
+            </div>
+            <div class="col-sm-4">
+                <label class="form-label">Unit cost (@Fmt.Currency)</label>
+                <input class="form-control" type="number" min="0" step="any" @bind="form.UnitCost" />
+            </div>
+            <div class="col-sm-4">
+                <label class="form-label">Alert below</label>
+                <input class="form-control" type="number" min="0" step="any" @bind="form.MinQuantity" />
+            </div>
+            <div class="col-12">
+                <label class="form-label">Notes</label>
+                <input class="form-control" @bind="form.Notes" placeholder="Supplier, brand, shade…" />
+            </div>
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-light" @onclick="() => showForm = false">Cancel</button>
+        <button class="btn btn-primary" @onclick="SaveAsync">Save</button>
+    </Footer>
+</Modal>
+
+@* ---------- Restock ---------- *@
+<Modal @bind-Show="showRestock" Title="@($"Restock · {restockItem?.Name}")">
+    <ChildContent>
+        @if (formError is not null) { <div class="alert alert-danger py-2">@formError</div> }
+        <div class="mb-2 small-muted">Currently @Fmt.Qty(restockItem?.Quantity ?? 0) @restockItem?.Unit in stock at @Fmt.Money(restockItem?.UnitCost ?? 0) each.</div>
+        <div class="row g-3">
+            <div class="col-sm-6">
+                <label class="form-label">Quantity to add</label>
+                <input class="form-control" type="number" min="0" step="any" @bind="restockQty" />
+            </div>
+            <div class="col-sm-6">
+                <label class="form-label">New unit cost <span class="small-muted">(optional)</span></label>
+                <input class="form-control" type="number" min="0" step="any" @bind="restockCost" />
+            </div>
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-light" @onclick="() => showRestock = false">Cancel</button>
+        <button class="btn btn-primary" @onclick="RestockAsync">Add to stock</button>
+    </Footer>
+</Modal>
+
+@code {
+    private List<InventoryItem> items = [];
+    private bool loading = true;
+    private string search = "";
+    private ItemCategory? category;
+    private bool lowOnly;
+    private bool showArchived;
+
+    private bool showForm;
+    private InventoryItem form = new();
+    private string? formError;
+
+    private bool showRestock;
+    private InventoryItem? restockItem;
+    private decimal restockQty;
+    private decimal? restockCost;
+
+    private List<InventoryItem> Filtered => items
+        .Where(i => category is null || i.Category == category)
+        .Where(i => !lowOnly || i.IsLowStock)
+        .Where(i => string.IsNullOrWhiteSpace(search) || i.Name.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        items = await InventorySvc.GetAllAsync(showArchived);
+        loading = false;
+    }
+
+    private void OpenNew()
+    {
+        formError = null;
+        form = new InventoryItem { Category = category ?? ItemCategory.Other };
+        showForm = true;
+    }
+
+    private void OpenEdit(InventoryItem i)
+    {
+        formError = null;
+        form = new InventoryItem
+        {
+            Id = i.Id, Name = i.Name, Category = i.Category, Unit = i.Unit, Quantity = i.Quantity,
+            UnitCost = i.UnitCost, MinQuantity = i.MinQuantity, Notes = i.Notes, IsArchived = i.IsArchived,
+        };
+        showForm = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(form.Name)) { formError = "Please enter the item name."; return; }
+        if (form.Quantity < 0 || form.UnitCost < 0 || form.MinQuantity < 0) { formError = "Values cannot be negative."; return; }
+        if (string.IsNullOrWhiteSpace(form.Unit)) form.Unit = "pcs";
+        await InventorySvc.SaveAsync(form);
+        showForm = false;
+        await LoadAsync();
+    }
+
+    private void OpenRestock(InventoryItem i)
+    {
+        formError = null;
+        restockItem = i;
+        restockQty = 0;
+        restockCost = null;
+        showRestock = true;
+    }
+
+    private async Task RestockAsync()
+    {
+        if (restockItem is null) return;
+        try
+        {
+            await InventorySvc.RestockAsync(restockItem.Id, restockQty, restockCost);
+            showRestock = false;
+            await LoadAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            formError = ex.Message;
+        }
+    }
+
+    private async Task DeleteAsync(InventoryItem i)
+    {
+        if (!await Dialog.ConfirmAsync("Delete item", $"Delete {i.Name}?", "Delete", "Cancel")) return;
+        var deleted = await InventorySvc.DeleteOrArchiveAsync(i.Id);
+        if (!deleted)
+            await Dialog.AlertAsync("Item archived", $"{i.Name} was used in past sessions, so it was archived instead of deleted. You can restore it from “Show archived”.");
+        await LoadAsync();
+    }
+
+    private async Task UnarchiveAsync(InventoryItem i)
+    {
+        await InventorySvc.UnarchiveAsync(i.Id);
+        await LoadAsync();
+    }
+}

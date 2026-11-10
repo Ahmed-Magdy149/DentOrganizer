@@ -1,0 +1,142 @@
+@page "/reports"
+@inject SessionService Sessions
+
+<PageTitle>Daily report</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Daily report</h1>
+        <div class="subtitle">@Fmt.Date(date)</div>
+    </div>
+    <div class="toolbar">
+        <button class="btn btn-light btn-icon" title="Previous day" @onclick="() => GoToAsync(date.AddDays(-1))">‹</button>
+        <input type="date" class="form-control" style="width: auto" @bind="date" @bind:after="LoadAsync" />
+        <button class="btn btn-light btn-icon" title="Next day" @onclick="() => GoToAsync(date.AddDays(1))">›</button>
+        <button class="btn btn-light" @onclick="() => GoToAsync(DateOnly.FromDateTime(DateTime.Today))">Today</button>
+    </div>
+</div>
+
+<div class="stat-grid">
+    <div class="stat"><div class="stat-label">Sessions</div><div class="stat-value">@sessions.Count</div></div>
+    <div class="stat"><div class="stat-label">Total fees</div><div class="stat-value">@Fmt.Money(sessions.Sum(s => s.Fee))</div></div>
+    <div class="stat"><div class="stat-label">Collected</div><div class="stat-value positive">@Fmt.Money(sessions.Sum(s => s.AmountPaid))</div></div>
+    <div class="stat"><div class="stat-label">Materials cost</div><div class="stat-value">@Fmt.Money(sessions.Sum(s => s.MaterialsCost))</div></div>
+    <div class="stat"><div class="stat-label">Net (fees − materials)</div><div class="stat-value">@Fmt.Money(sessions.Sum(s => s.NetProfit))</div></div>
+</div>
+
+<div class="card-box">
+    <h2>Sessions</h2>
+    @if (loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (sessions.Count == 0)
+    {
+        <div class="empty-state">No sessions on this day.</div>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="table-clean">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Patient</th>
+                        <th>Procedure</th>
+                        <th class="num">Fee</th>
+                        <th class="num">Paid</th>
+                        <th class="num">Due</th>
+                        <th class="num">Materials</th>
+                        <th class="num">Net</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @{ var n = 0; }
+                    @foreach (var s in sessions)
+                    {
+                        n++;
+                        <tr>
+                            <td class="muted">@n</td>
+                            <td><a href="patients/@s.PatientId" class="fw-semibold">@s.Patient?.FullName</a></td>
+                            <td>
+                                <a href="sessions/@s.Id">@s.Procedure</a>
+                                @if (!string.IsNullOrWhiteSpace(s.Teeth)) { <span class="small-muted"> · @s.Teeth</span> }
+                            </td>
+                            <td class="num">@Fmt.Money(s.Fee)</td>
+                            <td class="num">@Fmt.Money(s.AmountPaid)</td>
+                            <td class="num @(s.Balance > 0 ? "text-danger-strong" : "")">@Fmt.Money(s.Balance)</td>
+                            <td class="num">@Fmt.Money(s.MaterialsCost)</td>
+                            <td class="num fw-semibold">@Fmt.Money(s.NetProfit)</td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td colspan="3">Total</td>
+                        <td class="num">@Fmt.Money(sessions.Sum(s => s.Fee))</td>
+                        <td class="num">@Fmt.Money(sessions.Sum(s => s.AmountPaid))</td>
+                        <td class="num">@Fmt.Money(sessions.Sum(s => s.Balance))</td>
+                        <td class="num">@Fmt.Money(sessions.Sum(s => s.MaterialsCost))</td>
+                        <td class="num">@Fmt.Money(sessions.Sum(s => s.NetProfit))</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    }
+</div>
+
+@if (materialsUsed.Count > 0)
+{
+    <div class="card-box">
+        <h2>Materials consumed</h2>
+        <div class="table-wrap">
+            <table class="table-clean">
+                <thead><tr><th>Item</th><th class="num">Quantity</th><th class="num">Cost</th></tr></thead>
+                <tbody>
+                    @foreach (var m in materialsUsed)
+                    {
+                        <tr>
+                            <td>@m.Name</td>
+                            <td class="num">@Fmt.Qty(m.Qty) @m.Unit</td>
+                            <td class="num">@Fmt.Money(m.Cost)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private record MaterialSummary(string Name, string Unit, decimal Qty, decimal Cost);
+
+    private DateOnly date = DateOnly.FromDateTime(DateTime.Today);
+    private List<Session> sessions = [];
+    private List<MaterialSummary> materialsUsed = [];
+    private bool loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task GoToAsync(DateOnly d)
+    {
+        date = d;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        sessions = await Sessions.GetForRangeAsync(date, date);
+        materialsUsed = sessions
+            .SelectMany(s => s.Materials)
+            .GroupBy(m => m.InventoryItemId)
+            .Select(g => new MaterialSummary(
+                g.First().InventoryItem?.Name ?? "?",
+                g.First().InventoryItem?.Unit ?? "",
+                g.Sum(m => m.Quantity),
+                g.Sum(m => m.TotalCost)))
+            .OrderByDescending(m => m.Cost)
+            .ToList();
+        loading = false;
+    }
+}

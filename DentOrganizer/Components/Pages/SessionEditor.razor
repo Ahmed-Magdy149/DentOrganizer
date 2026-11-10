@@ -1,0 +1,494 @@
+@page "/sessions/new/{PatientId:int}"
+@page "/sessions/{SessionId:int}"
+@inject SessionService Sessions
+@inject PatientService Patients
+@inject InventoryService Inventory
+@inject AttachmentService Files
+@inject DialogService Dialog
+@inject NavigationManager Nav
+
+<PageTitle>Session</PageTitle>
+
+@if (loading)
+{
+    <p class="muted">Loading…</p>
+}
+else if (patient is null)
+{
+    <div class="empty-state">Not found. <a href="patients">Back to patients</a></div>
+}
+else
+{
+    <div class="page-header">
+        <div>
+            <div class="small-muted"><a href="patients">Patients</a> / <a href="patients/@patient.Id">@patient.FullName</a> /</div>
+            <h1>@(IsNew ? "New session" : $"Session · {Fmt.ShortDate(model.Date)}")</h1>
+        </div>
+        <div class="toolbar">
+            <a class="btn btn-light" href="patients/@patient.Id">Back to patient</a>
+            @if (!IsNew)
+            {
+                <button class="btn btn-outline-danger" @onclick="DeleteAsync">Delete session</button>
+            }
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(patient.MedicalHistory))
+    {
+        <div class="medical-alert"><strong>Medical history:</strong> @patient.MedicalHistory</div>
+    }
+
+    @if (error is not null)
+    {
+        <div class="alert alert-danger py-2 d-flex justify-content-between">
+            <span>@error</span>
+            <button class="btn-close" @onclick="() => error = null"></button>
+        </div>
+    }
+
+    <div class="row g-3">
+        <div class="col-xl-8">
+            @* ---------- Main details ---------- *@
+            <div class="card-box">
+                <h2>What was done</h2>
+                <div class="row g-3">
+                    <div class="col-sm-4">
+                        <label class="form-label">Date</label>
+                        <input class="form-control" type="date" @bind="model.Date" />
+                    </div>
+                    <div class="col-sm-8">
+                        <label class="form-label">Procedure *</label>
+                        <input class="form-control" list="proc-list" @bind="model.Procedure" placeholder="e.g. Root canal treatment" />
+                        <datalist id="proc-list">
+                            @foreach (var p in Fmt.CommonProcedures)
+                            {
+                                <option value="@p"></option>
+                            }
+                        </datalist>
+                    </div>
+                    <div class="col-sm-4">
+                        <label class="form-label">Teeth <span class="small-muted">(FDI, e.g. 36, 37)</span></label>
+                        <input class="form-control" @bind="model.Teeth" />
+                    </div>
+                    <div class="col-sm-8">
+                        <label class="form-label">Diagnosis</label>
+                        <input class="form-control" @bind="model.Diagnosis" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Notes</label>
+                        <textarea class="form-control" rows="3" @bind="model.Notes"></textarea>
+                    </div>
+                    <div class="col-sm-4">
+                        <label class="form-label">Fee (@Fmt.Currency)</label>
+                        <input class="form-control" type="number" min="0" step="any" @bind="model.Fee" />
+                    </div>
+                    <div class="col-sm-4">
+                        <label class="form-label">Amount paid (@Fmt.Currency)</label>
+                        <div class="input-group">
+                            <input class="form-control" type="number" min="0" step="any" @bind="model.AmountPaid" />
+                            <button class="btn btn-light border" type="button" title="Paid in full" @onclick="() => model.AmountPaid = model.Fee">Full</button>
+                        </div>
+                    </div>
+                    <div class="col-sm-4 d-flex align-items-end">
+                        <button class="btn btn-primary w-100" disabled="@saving" @onclick="SaveAsync">
+                            @(IsNew ? "Create session" : "Save changes")
+                        </button>
+                    </div>
+                </div>
+                @if (savedMessage)
+                {
+                    <div class="small text-success mt-2">Saved ✓</div>
+                }
+            </div>
+
+            @if (IsNew)
+            {
+                <div class="card-box muted">
+                    Create the session first, then you can add medications, materials from stock, and X-rays / photos / files.
+                </div>
+            }
+            else
+            {
+                @* ---------- Medications ---------- *@
+                <div class="card-box">
+                    <h2>Medications</h2>
+                    @if (model.Medications.Count > 0)
+                    {
+                        <div class="table-wrap mb-3">
+                            <table class="table-clean">
+                                <thead><tr><th>Medication</th><th>Dosage</th><th>Frequency</th><th>Duration</th><th>Notes</th><th></th></tr></thead>
+                                <tbody>
+                                    @foreach (var m in model.Medications)
+                                    {
+                                        <tr>
+                                            <td class="fw-semibold">@m.Name</td>
+                                            <td>@m.Dosage</td>
+                                            <td>@m.Frequency</td>
+                                            <td>@m.Duration</td>
+                                            <td>@m.Notes</td>
+                                            <td class="actions"><button class="btn btn-sm btn-light text-danger" @onclick="() => RemoveMedicationAsync(m)">Remove</button></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-3">
+                            <label class="form-label">Medication</label>
+                            <input class="form-control" list="med-list" @bind="newMed.Name" />
+                            <datalist id="med-list">
+                                @foreach (var m in Fmt.CommonMedications)
+                                {
+                                    <option value="@m"></option>
+                                }
+                            </datalist>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Dosage</label>
+                            <input class="form-control" placeholder="1 tab" @bind="newMed.Dosage" />
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Frequency</label>
+                            <input class="form-control" placeholder="every 8h" @bind="newMed.Frequency" />
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Duration</label>
+                            <input class="form-control" placeholder="5 days" @bind="newMed.Duration" />
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Notes</label>
+                            <input class="form-control" placeholder="after meals" @bind="newMed.Notes" />
+                        </div>
+                        <div class="col-md-1">
+                            <button class="btn btn-outline-primary w-100" @onclick="AddMedicationAsync">Add</button>
+                        </div>
+                    </div>
+                </div>
+
+                @* ---------- Materials ---------- *@
+                <div class="card-box">
+                    <h2>
+                        Materials used from stock
+                        <span class="small-muted fw-normal">Cost: <b>@Fmt.Money(model.MaterialsCost)</b></span>
+                    </h2>
+                    @if (model.Materials.Count > 0)
+                    {
+                        <div class="table-wrap mb-3">
+                            <table class="table-clean">
+                                <thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Unit cost</th><th class="num">Total</th><th></th></tr></thead>
+                                <tbody>
+                                    @foreach (var m in model.Materials)
+                                    {
+                                        <tr>
+                                            <td class="fw-semibold">@m.InventoryItem?.Name</td>
+                                            <td class="num">@Fmt.Qty(m.Quantity) @m.InventoryItem?.Unit</td>
+                                            <td class="num">@Fmt.Money(m.UnitCost)</td>
+                                            <td class="num">@Fmt.Money(m.TotalCost)</td>
+                                            <td class="actions"><button class="btn btn-sm btn-light text-danger" title="Remove and return to stock" @onclick="() => RemoveMaterialAsync(m)">Remove</button></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                    @if (stock.Count == 0)
+                    {
+                        <div class="small-muted">No items in inventory yet. <a href="inventory">Add stock items</a> first.</div>
+                    }
+                    else
+                    {
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-7">
+                                <label class="form-label">Item</label>
+                                <select class="form-select" @bind="newMaterialItemId">
+                                    <option value="0">— choose an item —</option>
+                                    @foreach (var group in stock.GroupBy(i => i.Category))
+                                    {
+                                        <optgroup label="@group.Key">
+                                            @foreach (var i in group)
+                                            {
+                                                <option value="@i.Id" disabled="@(i.Quantity <= 0)">
+                                                    @i.Name — @Fmt.Qty(i.Quantity) @i.Unit left · @Fmt.Money(i.UnitCost)/@i.Unit
+                                                </option>
+                                            }
+                                        </optgroup>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Quantity</label>
+                                <input class="form-control" type="number" min="0" step="any" @bind="newMaterialQty" />
+                            </div>
+                            <div class="col-md-2">
+                                <button class="btn btn-outline-primary w-100" @onclick="AddMaterialAsync">Add</button>
+                            </div>
+                        </div>
+                        <div class="small-muted mt-2">Adding an item deducts it from stock; removing it returns it.</div>
+                    }
+                </div>
+
+                @* ---------- Attachments ---------- *@
+                <div class="card-box">
+                    <h2>X-rays, photos &amp; files</h2>
+                    <div class="row g-2 align-items-end mb-3">
+                        <div class="col-md-3">
+                            <label class="form-label">Type</label>
+                            <select class="form-select" @bind="uploadKind">
+                                <option value="">Auto-detect</option>
+                                <option value="@AttachmentKind.XRay">X-ray</option>
+                                <option value="@AttachmentKind.Photo">Photo</option>
+                                <option value="@AttachmentKind.Document">Document</option>
+                                <option value="@AttachmentKind.Other">Other</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Description</label>
+                            <input class="form-control" placeholder="e.g. Periapical 36 before RCT" @bind="uploadDescription" />
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label">Files</label>
+                            <InputFile class="form-control" multiple OnChange="UploadAsync" disabled="@uploading" />
+                        </div>
+                    </div>
+                    @if (uploading)
+                    {
+                        <div class="small-muted mb-2">Uploading…</div>
+                    }
+                    @if (model.Attachments.Count == 0)
+                    {
+                        <div class="small-muted">No files yet.</div>
+                    }
+                    else
+                    {
+                        <AttachmentGrid Attachments="model.Attachments" OnDelete="DeleteAttachmentAsync" />
+                    }
+                </div>
+            }
+        </div>
+
+        @* ---------- Summary ---------- *@
+        <div class="col-xl-4">
+            <div class="card-box" style="position: sticky; top: 1rem">
+                <h2>Session cost</h2>
+                <div class="summary-list">
+                    <span>Fee</span><b>@Fmt.Money(model.Fee)</b>
+                    <span>Paid</span><b class="text-success">@Fmt.Money(model.AmountPaid)</b>
+                    <span>Balance due</span><b class="@(model.Balance > 0 ? "text-danger" : "")">@Fmt.Money(model.Balance)</b>
+                    <span class="mt-2">Materials cost</span><b class="mt-2">@Fmt.Money(model.MaterialsCost)</b>
+                    <span class="total">Net (fee − materials)</span><span class="total">@Fmt.Money(model.NetProfit)</span>
+                </div>
+                @if (!IsNew)
+                {
+                    <div class="small-muted mt-2">Fee and paid amount update after “Save changes”.</div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int? PatientId { get; set; }
+    [Parameter] public int? SessionId { get; set; }
+    [SupplyParameterFromQuery] public int? AppointmentId { get; set; }
+
+    private bool IsNew => SessionId is null;
+
+    private Patient? patient;
+    private Session model = new();
+    private List<InventoryItem> stock = [];
+    private bool loading = true;
+    private bool saving;
+    private bool savedMessage;
+    private string? error;
+
+    private SessionMedication newMed = new();
+    private int newMaterialItemId;
+    private decimal newMaterialQty = 1;
+
+    private AttachmentKind? uploadKind;
+    private string? uploadDescription;
+    private bool uploading;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        loading = true;
+        error = null;
+        savedMessage = false;
+
+        if (SessionId is int sid)
+        {
+            var s = await Sessions.GetAsync(sid);
+            if (s is not null)
+            {
+                model = s;
+                patient = s.Patient;
+            }
+            else
+            {
+                patient = null;
+            }
+            stock = await Inventory.GetAllAsync();
+        }
+        else if (PatientId is int pid)
+        {
+            patient = await Patients.GetAsync(pid);
+            model = new Session
+            {
+                PatientId = pid,
+                AppointmentId = AppointmentId,
+                Date = DateOnly.FromDateTime(DateTime.Today),
+            };
+        }
+        loading = false;
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (model.Id == 0) return;
+        // Refresh only the lists, so unsaved edits in the main form are kept.
+        var s = await Sessions.GetAsync(model.Id);
+        if (s is not null)
+        {
+            model.Medications = s.Medications;
+            model.Materials = s.Materials;
+            model.Attachments = s.Attachments;
+        }
+        stock = await Inventory.GetAllAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        error = null;
+        savedMessage = false;
+        if (string.IsNullOrWhiteSpace(model.Procedure))
+        {
+            error = "Please enter what was done in this session (procedure).";
+            return;
+        }
+        if (model.Fee < 0 || model.AmountPaid < 0)
+        {
+            error = "Amounts cannot be negative.";
+            return;
+        }
+
+        saving = true;
+        try
+        {
+            if (IsNew)
+            {
+                var created = await Sessions.CreateAsync(model);
+                Nav.NavigateTo($"sessions/{created.Id}", replace: true);
+            }
+            else
+            {
+                await Sessions.UpdateAsync(model);
+                savedMessage = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private async Task AddMedicationAsync()
+    {
+        if (string.IsNullOrWhiteSpace(newMed.Name))
+        {
+            error = "Please enter the medication name.";
+            return;
+        }
+        newMed.SessionId = model.Id;
+        await Sessions.AddMedicationAsync(newMed);
+        newMed = new SessionMedication();
+        await ReloadAsync();
+    }
+
+    private async Task RemoveMedicationAsync(SessionMedication m)
+    {
+        await Sessions.RemoveMedicationAsync(m.Id);
+        await ReloadAsync();
+    }
+
+    private async Task AddMaterialAsync()
+    {
+        error = null;
+        if (newMaterialItemId == 0)
+        {
+            error = "Please choose an item.";
+            return;
+        }
+        try
+        {
+            await Sessions.AddMaterialAsync(model.Id, newMaterialItemId, newMaterialQty);
+            newMaterialItemId = 0;
+            newMaterialQty = 1;
+            await ReloadAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            error = ex.Message;
+        }
+    }
+
+    private async Task RemoveMaterialAsync(SessionMaterial m)
+    {
+        if (!await Dialog.ConfirmAsync("Remove material",
+                $"Remove {m.InventoryItem?.Name} from this session and return {Fmt.Qty(m.Quantity)} {m.InventoryItem?.Unit} to stock?"))
+            return;
+        await Sessions.RemoveMaterialAsync(m.Id);
+        await ReloadAsync();
+    }
+
+    private async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        error = null;
+        uploading = true;
+        try
+        {
+            foreach (var file in e.GetMultipleFiles(maximumFileCount: 30))
+            {
+                if (file.Size > AttachmentService.MaxFileSize)
+                {
+                    error = $"{file.Name} is larger than {Fmt.FileSize(AttachmentService.MaxFileSize)} and was skipped.";
+                    continue;
+                }
+                await Files.SaveAsync(model.Id, file, uploadKind, uploadDescription);
+            }
+            uploadDescription = null;
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            error = "Upload failed: " + ex.Message;
+        }
+        finally
+        {
+            uploading = false;
+        }
+    }
+
+    private async Task DeleteAttachmentAsync(SessionAttachment a)
+    {
+        if (!await Dialog.ConfirmAsync("Delete file", $"Delete {a.OriginalFileName}?"))
+            return;
+        await Files.DeleteAsync(a.Id);
+        await ReloadAsync();
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (!await Dialog.ConfirmAsync("Delete session",
+                "Delete this session with its medications and files?\nMaterials used will be returned to stock.",
+                "Delete", "Cancel"))
+            return;
+        var pid = model.PatientId;
+        await Sessions.DeleteAsync(model.Id);
+        Nav.NavigateTo($"patients/{pid}");
+    }
+}

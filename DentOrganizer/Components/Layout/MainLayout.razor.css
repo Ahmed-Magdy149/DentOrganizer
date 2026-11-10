@@ -1,0 +1,39 @@
+.app-shell {
+    display: flex;
+    min-height: 100vh;
+}
+
+.app-sidebar {
+    width: 232px;
+    flex-shrink: 0;
+    background: var(--sidebar-bg);
+    color: #fff;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+}
+
+.app-main {
+    flex: 1;
+    min-width: 0;
+    padding: 1.5rem 2rem 3rem;
+}
+
+@media (max-width: 760px) {
+    .app-shell {
+        flex-direction: column;
+    }
+
+    .app-sidebar {
+        width: 100%;
+        height: auto;
+        position: sticky;
+        top: 0;
+        z-index: 50;
+    }
+
+    .app-main {
+        padding: 1rem 1rem 3rem;
+    }
+}

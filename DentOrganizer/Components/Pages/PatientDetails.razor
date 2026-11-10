@@ -1,0 +1,238 @@
+@page "/patients/{Id:int}"
+@inject PatientService Patients
+@inject SessionService Sessions
+@inject AppointmentService Appointments
+@inject DialogService Dialog
+@inject NavigationManager Nav
+
+<PageTitle>@(patient?.FullName ?? "Patient")</PageTitle>
+
+@if (loading)
+{
+    <p class="muted">Loading…</p>
+}
+else if (patient is null)
+{
+    <div class="empty-state">Patient not found. <a href="patients">Back to patients</a></div>
+}
+else
+{
+    <div class="page-header">
+        <div>
+            <div class="small-muted"><a href="patients">Patients</a> /</div>
+            <h1>@patient.FullName</h1>
+            <div class="subtitle">
+                @string.Join(" · ", new[]
+                {
+                    patient.Phone,
+                    patient.Age is int age ? $"{age} years" : null,
+                    patient.Gender != Gender.Unspecified ? patient.Gender.ToString() : null,
+                    patient.Address,
+                }.Where(s => !string.IsNullOrWhiteSpace(s)))
+            </div>
+        </div>
+        <div class="toolbar">
+            <button class="btn btn-light" @onclick="() => showEdit = true">Edit</button>
+            <a class="btn btn-outline-primary" href="appointments?new=1&patientId=@patient.Id">Book appointment</a>
+            <a class="btn btn-primary" href="sessions/new/@patient.Id">+ New session</a>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(patient.MedicalHistory))
+    {
+        <div class="medical-alert"><strong>Medical history:</strong> @patient.MedicalHistory</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(patient.Notes))
+    {
+        <div class="card-box py-2 small">@patient.Notes</div>
+    }
+
+    <div class="stat-grid">
+        <div class="stat"><div class="stat-label">Sessions</div><div class="stat-value">@sessions.Count</div></div>
+        <div class="stat"><div class="stat-label">Total fees</div><div class="stat-value">@Fmt.Money(sessions.Sum(s => s.Fee))</div></div>
+        <div class="stat"><div class="stat-label">Total paid</div><div class="stat-value positive">@Fmt.Money(sessions.Sum(s => s.AmountPaid))</div></div>
+        <div class="stat">
+            <div class="stat-label">Balance due</div>
+            <div class="stat-value @(balance > 0 ? "negative" : "")">@Fmt.Money(balance)</div>
+        </div>
+    </div>
+
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item"><button class="nav-link @(tab == 0 ? "active" : "")" @onclick="() => tab = 0">Sessions (@sessions.Count)</button></li>
+        <li class="nav-item"><button class="nav-link @(tab == 1 ? "active" : "")" @onclick="() => tab = 1">Appointments (@appointments.Count)</button></li>
+    </ul>
+
+    @if (tab == 0)
+    {
+        @if (sessions.Count == 0)
+        {
+            <div class="card-box empty-state">No sessions recorded yet.</div>
+        }
+        @foreach (var s in sessions)
+        {
+            var open = expanded.Contains(s.Id);
+            <div class="session-card">
+                <div class="session-card-header" @onclick="() => Toggle(s)">
+                    <span class="date">@Fmt.ShortDate(s.Date)</span>
+                    <span class="proc">
+                        <span class="fw-semibold">@s.Procedure</span>
+                        @if (!string.IsNullOrWhiteSpace(s.Teeth))
+                        {
+                            <span class="small-muted"> · Teeth @s.Teeth</span>
+                        }
+                    </span>
+                    <span class="toolbar small">
+                        @if (s.Medications.Count > 0) { <span class="badge-soft">@s.Medications.Count med</span> }
+                        @if (s.Attachments.Count > 0) { <span class="badge-soft">@s.Attachments.Count file(s)</span> }
+                        <span class="fw-semibold">@Fmt.Money(s.Fee)</span>
+                        @if (s.Balance > 0) { <span class="badge-soft badge-low">due @Fmt.Money(s.Balance)</span> }
+                        <span class="muted">@(open ? "▲" : "▼")</span>
+                    </span>
+                </div>
+                @if (open)
+                {
+                    <div class="session-card-body">
+                        @if (!string.IsNullOrWhiteSpace(s.Diagnosis))
+                        {
+                            <h3>Diagnosis</h3>
+                            <div style="white-space: pre-wrap">@s.Diagnosis</div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(s.Notes))
+                        {
+                            <h3>Notes</h3>
+                            <div style="white-space: pre-wrap">@s.Notes</div>
+                        }
+
+                        @if (s.Medications.Count > 0)
+                        {
+                            <h3>Medications</h3>
+                            <ul class="mb-0">
+                                @foreach (var m in s.Medications)
+                                {
+                                    <li><b>@m.Name</b> @string.Join(" · ", new[] { m.Dosage, m.Frequency, m.Duration, m.Notes }.Where(x => !string.IsNullOrWhiteSpace(x)))</li>
+                                }
+                            </ul>
+                        }
+
+                        @if (s.Materials.Count > 0)
+                        {
+                            <h3>Materials used</h3>
+                            <ul class="mb-0">
+                                @foreach (var m in s.Materials)
+                                {
+                                    <li>@m.InventoryItem?.Name — @Fmt.Qty(m.Quantity) @m.InventoryItem?.Unit <span class="small-muted">(@Fmt.Money(m.TotalCost))</span></li>
+                                }
+                            </ul>
+                        }
+
+                        @if (s.Attachments.Count > 0)
+                        {
+                            <h3>X-rays, photos &amp; files</h3>
+                            <AttachmentGrid Attachments="s.Attachments" />
+                        }
+
+                        <h3>Cost</h3>
+                        <div class="money-line">
+                            <span>Fee <b>@Fmt.Money(s.Fee)</b></span>
+                            <span>Paid <b>@Fmt.Money(s.AmountPaid)</b></span>
+                            <span>Due <b class="@(s.Balance > 0 ? "text-danger" : "")">@Fmt.Money(s.Balance)</b></span>
+                            <span>Materials <b>@Fmt.Money(s.MaterialsCost)</b></span>
+                            <span>Net <b>@Fmt.Money(s.NetProfit)</b></span>
+                        </div>
+
+                        <div class="mt-3">
+                            <a class="btn btn-sm btn-outline-primary" href="sessions/@s.Id">Open / edit session</a>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    }
+    else
+    {
+        <div class="card-box">
+            @if (appointments.Count == 0)
+            {
+                <div class="empty-state">No appointments.</div>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table class="table-clean">
+                        <thead><tr><th>Date</th><th>Time</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var a in appointments)
+                            {
+                                <tr>
+                                    <td>@Fmt.Date(a.Date)</td>
+                                    <td>@Fmt.Time(a.StartTime)</td>
+                                    <td>@a.Reason</td>
+                                    <td><span class="badge-soft @Fmt.StatusClass(a.Status)">@Fmt.StatusText(a.Status)</span></td>
+                                    <td class="actions">
+                                        @if (a.Session is not null)
+                                        {
+                                            <a class="btn btn-sm btn-light" href="sessions/@a.Session.Id">Session</a>
+                                        }
+                                        else
+                                        {
+                                            <a class="btn btn-sm btn-light" href="appointments?date=@a.Date.ToString("yyyy-MM-dd")">Open day</a>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+
+    <div class="mt-4 text-end">
+        <button class="btn btn-sm btn-outline-danger" @onclick="DeleteAsync">Delete patient</button>
+    </div>
+
+    <PatientFormModal @bind-Show="showEdit" Patient="patient" OnSaved="p => patient = p" />
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private Patient? patient;
+    private List<Session> sessions = [];
+    private List<Appointment> appointments = [];
+    private readonly HashSet<int> expanded = [];
+    private bool loading = true;
+    private bool showEdit;
+    private int tab;
+
+    private decimal balance => sessions.Sum(s => s.Balance);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        loading = true;
+        patient = await Patients.GetAsync(Id);
+        if (patient is not null)
+        {
+            sessions = await Sessions.GetForPatientAsync(Id);
+            appointments = await Appointments.GetForPatientAsync(Id);
+            if (sessions.Count > 0) expanded.Add(sessions[0].Id); // latest session open by default
+        }
+        loading = false;
+    }
+
+    private void Toggle(Session s)
+    {
+        if (!expanded.Remove(s.Id)) expanded.Add(s.Id);
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (patient is null) return;
+        if (!await Dialog.ConfirmAsync("Delete patient",
+                $"Delete {patient.FullName} with ALL appointments, sessions and files?\nThis cannot be undone.",
+                "Delete", "Cancel"))
+            return;
+        await Patients.DeleteAsync(patient.Id);
+        Nav.NavigateTo("patients");
+    }
+}

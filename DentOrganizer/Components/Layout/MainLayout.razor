@@ -1,0 +1,27 @@
+﻿@inherits LayoutComponentBase
+
+<div class="app-shell">
+    <aside class="app-sidebar">
+        <NavMenu />
+    </aside>
+
+    <main class="app-main">
+        <ErrorBoundary @ref="errorBoundary">
+            <ChildContent>
+                @Body
+            </ChildContent>
+            <ErrorContent Context="ex">
+                <div class="alert alert-danger">
+                    <strong>Something went wrong.</strong> @ex.Message
+                    <button class="btn btn-sm btn-outline-danger ms-2" @onclick="() => errorBoundary?.Recover()">Dismiss</button>
+                </div>
+            </ErrorContent>
+        </ErrorBoundary>
+    </main>
+</div>
+
+@code {
+    private ErrorBoundary? errorBoundary;
+
+    protected override void OnParametersSet() => errorBoundary?.Recover();
+}
