@@ -1,0 +1,106 @@
+@namespace DentOrganizer.Components.Shared
+
+@* Interactive FDI dental chart: tap a tooth to mark it. Permanent (32) or deciduous (20) teeth. *@
+
+<svg class="tooth-chart" viewBox="0 0 520 92" role="img" aria-label="FDI dental chart">
+    <defs>
+        <path id="tooth-path" d="M12 3.2c-1.6-1-3.6-1.5-5.3-.9C4.4 3.1 3.3 5.4 3.6 8c.3 2.3 1 3.6 1.6 5.6.6 2.2.8 4.7 1.6 6.6.4 1 1.6 1.2 2.1.2.8-1.6 1-4.4 3.1-4.4s2.3 2.8 3.1 4.4c.5 1 1.7.8 2.1-.2.8-1.9 1-4.4 1.6-6.6.6-2 1.3-3.3 1.6-5.6.3-2.6-.8-4.9-3.1-5.7-1.7-.6-3.7-.1-5.3.9Z" />
+    </defs>
+
+    <line x1="0" y1="46" x2="520" y2="46" class="chart-line" />
+    <line x1="260" y1="0" x2="260" y2="92" class="chart-line" />
+
+    @foreach (var t in Teeth)
+    {
+        var partial = t.Part is { Length: > 0 };
+        var (fill, stroke) = t.Marked ? Fmt.ToothColor(t.ItemId, t.Procedure) : ("#ffffff", "#b0bec5");
+        var bodyFill = partial ? "#ffffff" : fill;
+        var bodyStroke = partial ? "#90a4ae" : stroke;
+        <g class="tooth" @onclick="() => OnToothTap.InvokeAsync(t.Number)">
+            @if (partial)
+            {
+                var r = PartRect(t.Part!);
+                <clipPath id="cp-@t.Number"><rect x="@r.X" y="@r.Y" width="@r.W" height="@r.H" /></clipPath>
+            }
+            <g transform="translate(@(t.Cx) @(t.ToothY)) scale(1.8) translate(-12 -9)">
+                <use href="#tooth-path" fill="@bodyFill" stroke="@bodyStroke" stroke-width="0.7" />
+                @if (partial)
+                {
+                    <use href="#tooth-path" fill="@fill" clip-path="url(#cp-@t.Number)" />
+                }
+            </g>
+            @ToothText(t.Cx, t.ToothY + 4, t.Number.ToString(), "tooth-num")
+            @if (t.Label is not null)
+            {
+                @ToothText(t.Cx, t.LabelY, t.Label, "tooth-label")
+            }
+        </g>
+    }
+</svg>
+
+@code {
+    /// <summary>Current marks of the session.</summary>
+    [Parameter] public IReadOnlyList<ToothMark> Marks { get; set; } = [];
+
+    /// <summary>Show deciduous (primary) teeth instead of permanent ones.</summary>
+    [Parameter] public bool Deciduous { get; set; }
+
+    /// <summary>Invoked with the FDI number of the tapped tooth.</summary>
+    [Parameter] public EventCallback<int> OnToothTap { get; set; }
+
+    private sealed record ToothCell(int Number, int Cx, int ToothY, int LabelY, bool Marked, int? ItemId, string? Procedure, string? Part, string? Label);
+    private readonly record struct ClipRect(double X, double Y, double W, double H);
+
+    // FDI order as displayed: patient's right on the viewer's left.
+    private static readonly int[] Upper = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
+    private static readonly int[] Lower = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
+    private static readonly int[] ChildUpper = [55, 54, 53, 52, 51, 61, 62, 63, 64, 65];
+    private static readonly int[] ChildLower = [85, 84, 83, 82, 81, 71, 72, 73, 74, 75];
+
+    private List<ToothCell> Teeth { get; } = [];
+
+    // Razor reserves the <text> tag, so SVG text nodes are emitted as raw markup.
+    private static MarkupString ToothText(int x, int y, string content, string cssClass) =>
+        new($"<text class=\"{cssClass}\" x=\"{x}\" y=\"{y}\">{System.Net.WebUtility.HtmlEncode(content)}</text>");
+
+    /// <summary>Clip rectangles in tooth-path coordinates (path spans roughly x 3-21, y 2-17).</summary>
+    private static ClipRect PartRect(string part) => part switch
+    {
+        "Occlusal" => new ClipRect(1, 0.5, 22, 8.5),   // top ~45%
+        "Mesial" => new ClipRect(1, 0.5, 11, 18),      // left half
+        "Distal" => new ClipRect(12, 0.5, 11, 18),     // right half
+        "Cervical" => new ClipRect(1, 9, 22, 9),       // bottom ~45%
+        _ => new ClipRect(0, 0, 24, 24),
+    };
+
+    protected override void OnParametersSet()
+    {
+        var map = Marks
+            .GroupBy(m => m.ToothNumber)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var upper = Deciduous ? ChildUpper : Upper;
+        var lower = Deciduous ? ChildLower : Lower;
+
+        Teeth.Clear();
+        for (var i = 0; i < upper.Length; i++)
+            Add(upper[i], Cx(i, upper.Length), 15, 34);
+        for (var i = 0; i < lower.Length; i++)
+            Add(lower[i], Cx(i, lower.Length), 63, 84);
+
+        // Tooth cells are centered horizontally in the 520-wide viewBox.
+        static int Cx(int i, int count) => (int)((520 - count * 32) / 2) + 16 + i * 32;
+
+        void Add(int number, int cx, int toothY, int labelY)
+        {
+            var marked = map.TryGetValue(number, out var mark);
+            var itemId = mark?.InventoryItemId;
+            var procedure = mark?.Procedure;
+            var part = mark?.Part;
+            var label = !marked ? null
+                : procedure is { Length: > 0 } p ? Fmt.ShortItemName(p)
+                : "✓";
+            Teeth.Add(new ToothCell(number, cx, toothY, labelY, marked, itemId, procedure, part, label));
+        }
+    }
+}

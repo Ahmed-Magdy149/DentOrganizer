@@ -42,6 +42,37 @@ namespace DentOrganizer
             using (var db = app.Services.GetRequiredService<IDbContextFactory<AppDbContext>>().CreateDbContext())
             {
                 db.Database.EnsureCreated();
+                // EnsureCreated is a no-op on databases created before ToothMarks existed.
+                db.Database.ExecuteSqlRaw("""
+                    CREATE TABLE IF NOT EXISTS "ToothMarks" (
+                        "Id" INTEGER NOT NULL CONSTRAINT "PK_ToothMarks" PRIMARY KEY AUTOINCREMENT,
+                        "SessionId" INTEGER NOT NULL,
+                        "ToothNumber" INTEGER NOT NULL,
+                        "InventoryItemId" INTEGER NULL,
+                        CONSTRAINT "FK_ToothMarks_Sessions_SessionId" FOREIGN KEY ("SessionId")
+                            REFERENCES "Sessions" ("Id") ON DELETE CASCADE,
+                        CONSTRAINT "FK_ToothMarks_InventoryItems_InventoryItemId" FOREIGN KEY ("InventoryItemId")
+                            REFERENCES "InventoryItems" ("Id") ON DELETE SET NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS "IX_ToothMarks_SessionId" ON "ToothMarks" ("SessionId");
+                    """);
+                // Databases created before the Procedure column existed need it added manually.
+                var toothMarkColumns = db.Database
+                    .SqlQuery<string>($"SELECT name AS Value FROM pragma_table_info('{nameof(AppDbContext.ToothMarks)}')")
+                    .ToList();
+                var toothMarkTable = nameof(AppDbContext.ToothMarks);
+                foreach (var col in new[] { nameof(ToothMark.Procedure), nameof(ToothMark.Part) })
+                {
+                    if (!toothMarkColumns.Contains(col))
+                    {
+                        // Identifiers can't be parameterized; col comes from nameof() constants only.
+#pragma warning disable EF1003
+                        db.Database.ExecuteSqlRaw(
+                            "ALTER TABLE \"" + toothMarkTable + "\" ADD COLUMN \"" + col + "\" TEXT NULL");
+#pragma warning restore EF1003
+                    }
+                }
+                DemoDataSeeder.SeedIfEmpty(db);
             }
 
             return app;

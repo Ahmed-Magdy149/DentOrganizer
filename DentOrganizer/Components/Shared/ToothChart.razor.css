@@ -1,0 +1,38 @@
+.tooth-chart {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+.chart-line {
+    stroke: #d5dde3;
+    stroke-width: 1;
+    stroke-dasharray: 4 4;
+}
+
+.tooth {
+    cursor: pointer;
+}
+
+.tooth:hover use {
+    stroke-width: 1.1;
+    filter: brightness(0.94);
+}
+
+.tooth-num {
+    font-size: 10px;
+    font-weight: 600;
+    fill: #1d2a33;
+    text-anchor: middle;
+    pointer-events: none;
+    user-select: none;
+}
+
+.tooth-label {
+    font-size: 8px;
+    font-weight: 600;
+    fill: #33454f;
+    text-anchor: middle;
+    pointer-events: none;
+    user-select: none;
+}

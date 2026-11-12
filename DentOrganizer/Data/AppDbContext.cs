@@ -10,6 +10,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<SessionMedication> SessionMedications => Set<SessionMedication>();
     public DbSet<SessionMaterial> SessionMaterials => Set<SessionMaterial>();
     public DbSet<SessionAttachment> SessionAttachments => Set<SessionAttachment>();
+    public DbSet<ToothMark> ToothMarks => Set<ToothMark>();
     public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder builder)
@@ -37,5 +38,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .WithMany()
             .HasForeignKey(m => m.InventoryItemId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        b.Entity<ToothMark>().HasIndex(m => m.SessionId);
+        b.Entity<ToothMark>()
+            .HasOne(m => m.Session)
+            .WithMany()
+            .HasForeignKey(m => m.SessionId)
+            .OnDelete(DeleteBehavior.Cascade);
+        b.Entity<ToothMark>()
+            .HasOne(m => m.Item)
+            .WithMany()
+            .HasForeignKey(m => m.InventoryItemId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

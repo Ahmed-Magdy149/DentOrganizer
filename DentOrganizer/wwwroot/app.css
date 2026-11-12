@@ -357,3 +357,45 @@ h1:focus { outline: none; }
     width: 100%;
     z-index: 1;
 }
+
+/* ---------- Teeth chart legend ---------- */
+.teeth-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.75rem;
+}
+
+.legend-chip {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: 999px;
+    padding: 0.25rem 0.7rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    color: var(--text);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.legend-chip:hover {
+    border-color: var(--accent);
+}
+
+.legend-chip.active {
+    border-color: var(--chip-stroke, var(--accent));
+    background: var(--chip-fill, var(--accent));
+    font-weight: 600;
+}
+
+.legend-erase {
+    border-style: dashed;
+    color: var(--muted);
+}
+
+.legend-erase.active {
+    --chip-fill: #eceff1;
+    --chip-stroke: #90a4ae;
+}

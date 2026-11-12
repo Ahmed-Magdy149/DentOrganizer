@@ -106,6 +106,37 @@ public class SessionService(IDbContextFactory<AppDbContext> dbFactory, Attachmen
         await db.SessionMedications.Where(m => m.Id == medicationId).ExecuteDeleteAsync();
     }
 
+    // ---------- Tooth marks (dental chart) ----------
+
+    public async Task<List<ToothMark>> GetToothMarksAsync(int sessionId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        return await db.ToothMarks.AsNoTracking()
+            .Where(m => m.SessionId == sessionId)
+            .OrderBy(m => m.ToothNumber)
+            .ToListAsync();
+    }
+
+    /// <summary>Replaces all tooth marks of a session (used when the doctor saves the dental chart).</summary>
+    public async Task ReplaceToothMarksAsync(int sessionId, IEnumerable<ToothMark> marks)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var existing = await db.ToothMarks.Where(m => m.SessionId == sessionId).ToListAsync();
+        db.ToothMarks.RemoveRange(existing);
+        foreach (var m in marks)
+        {
+            db.ToothMarks.Add(new ToothMark
+            {
+                SessionId = sessionId,
+                ToothNumber = m.ToothNumber,
+                Procedure = m.Procedure,
+                Part = m.Part,
+                InventoryItemId = m.InventoryItemId,
+            });
+        }
+        await db.SaveChangesAsync();
+    }
+
     // ---------- Materials (stock) ----------
 
     /// <summary>Uses <paramref name="quantity"/> of a stock item in the session and deducts it from stock.</summary>

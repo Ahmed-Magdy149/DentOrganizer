@@ -170,6 +170,30 @@ public class SessionAttachment
     [NotMapped] public bool IsImage => ContentType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true;
 }
 
+/// <summary>A tooth marked on the session's dental chart, colored by the inventory item (filling type) used.</summary>
+public class ToothMark
+{
+    public int Id { get; set; }
+
+    public int SessionId { get; set; }
+    public Session? Session { get; set; }
+
+    /// <summary>FDI tooth number, e.g. 36.</summary>
+    public int ToothNumber { get; set; }
+
+    /// <summary>The procedure done on this tooth (e.g. "Composite filling"); drives the tooth color.</summary>
+    [MaxLength(150)]
+    public string? Procedure { get; set; }
+
+    /// <summary>Which part of the tooth was treated: null = whole tooth, otherwise Occlusal/Mesial/Distal/Cervical.</summary>
+    [MaxLength(30)]
+    public string? Part { get; set; }
+
+    /// <summary>The stock item used on this tooth; null when marked without a type (imported from the Teeth text field).</summary>
+    public int? InventoryItemId { get; set; }
+    public InventoryItem? Item { get; set; }
+}
+
 public class InventoryItem
 {
     public int Id { get; set; }

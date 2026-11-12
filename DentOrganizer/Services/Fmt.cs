@@ -22,6 +22,27 @@ public static class Fmt
         _ => $"{bytes / 1024.0 / 1024.0:0.#} MB",
     };
 
+    /// <summary>Short display name for an inventory item on the dental chart (drops parenthesized details).</summary>
+    public static string ShortItemName(string name)
+    {
+        var s = name.Split('(')[0].Trim();
+        if (s.Length <= 14) return s;
+        var idx = s.LastIndexOf(' ', 14);
+        return idx > 4 ? s[..idx] : s[..14];
+    }
+
+    /// <summary>Deterministic pastel color for a tooth mark, tinted by its procedure (or stock item) name.</summary>
+    public static (string Fill, string Stroke) ToothColor(int? itemId = null, string? procedure = null)
+    {
+        var key = procedure ?? itemId?.ToString();
+        if (key is null) return ("#eceff1", "#90a4ae");
+        // Stable hash: string.GetHashCode is randomized per process, which would change colors between runs.
+        var hash = 0;
+        foreach (var c in key) hash = hash * 31 + char.ToUpperInvariant(c);
+        var hue = ((hash % 360) + 360) % 360;
+        return ($"hsl({hue}, 62%, 74%)", $"hsl({hue}, 55%, 45%)");
+    }
+
     public static string StatusClass(AppointmentStatus s) => s switch
     {
         AppointmentStatus.Scheduled => "badge-scheduled",

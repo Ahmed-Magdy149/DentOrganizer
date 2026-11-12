@@ -101,6 +101,23 @@ else
                 }
             </div>
 
+            @* ---------- Dental chart ---------- *@
+            <div class="card-box">
+                <h2>Teeth chart <span class="small-muted fw-normal">Tap a tooth to choose what was done on it</span></h2>
+                <div class="d-flex gap-2 mb-2">
+                    <button type="button" class="btn btn-sm @(deciduousChart ? "btn-outline-primary" : "btn-primary")"
+                            @onclick="() => deciduousChart = false">Adult teeth</button>
+                    <button type="button" class="btn btn-sm @(deciduousChart ? "btn-primary" : "btn-outline-primary")"
+                            @onclick="() => deciduousChart = true">Child teeth</button>
+                </div>
+                <ToothChart Marks="toothMarks" Deciduous="deciduousChart" OnToothTap="OnToothTap" />
+                <div class="small-muted mt-2">
+                    Marked: @(toothMarks.Count == 0 ? "none" : string.Join(" · ", toothMarks.OrderBy(m => m.ToothNumber)
+                        .Select(m => $"{m.ToothNumber}{(m.Procedure is { Length: > 0 } p ? $": {p}" : "")}")))
+                    · marks are saved when you save the session
+                </div>
+            </div>
+
             @if (IsNew)
             {
                 <div class="card-box muted">
@@ -285,6 +302,36 @@ else
             </div>
         </div>
     </div>
+
+    @* ---------- Tooth treatment picker ---------- *@
+    <Modal @bind-Show="chartModalOpen" Title="@(chartTooth is int ct ? $"Tooth {ct} — what was done?" : "Tooth")">
+        <p class="small-muted mb-2">What was done on this tooth?</p>
+        <div class="teeth-legend mb-2">
+            <span class="small-muted align-self-center">Part:</span>
+            <button type="button" class="legend-chip @(chartDraftPart is null ? "active" : "")"
+                    @onclick="() => chartDraftPart = null">Whole tooth</button>
+            @foreach (var part in ToothParts)
+            {
+                <button type="button" class="legend-chip @(chartDraftPart == part ? "active" : "")"
+                        @onclick="() => chartDraftPart = part">@part</button>
+            }
+        </div>
+        <div class="teeth-legend">
+            @if (chartTooth is int markedTooth && toothMarks.Any(m => m.ToothNumber == markedTooth))
+            {
+                <button type="button" class="legend-chip legend-erase" @onclick="RemoveToothMark">Remove mark</button>
+            }
+            <button type="button" class="legend-chip @(chartToothMarked && chartToothProcedure is null ? "active" : "")"
+                    @onclick="() => ChooseToothProcedure(null)">No procedure</button>
+            @foreach (var proc in Fmt.CommonProcedures)
+            {
+                var (fill, stroke) = Fmt.ToothColor(procedure: proc);
+                <button type="button" class="legend-chip @(chartToothMarked && chartToothProcedure == proc ? "active" : "")"
+                        style="--chip-fill:@fill; --chip-stroke:@stroke"
+                        @onclick="() => ChooseToothProcedure(proc)">@proc</button>
+            }
+        </div>
+    </Modal>
 }
 
 @code {
@@ -310,6 +357,13 @@ else
     private string? uploadDescription;
     private bool uploading;
 
+    private List<ToothMark> toothMarks = [];
+    private bool deciduousChart;
+    private int? chartTooth;
+    private bool chartModalOpen;
+    private string? chartDraftPart;
+    private static readonly string[] ToothParts = ["Occlusal", "Mesial", "Distal", "Cervical"];
+
     protected override async Task OnParametersSetAsync()
     {
         loading = true;
@@ -328,7 +382,6 @@ else
             {
                 patient = null;
             }
-            stock = await Inventory.GetAllAsync();
         }
         else if (PatientId is int pid)
         {
@@ -340,6 +393,12 @@ else
                 Date = DateOnly.FromDateTime(DateTime.Today),
             };
         }
+
+        stock = await Inventory.GetAllAsync();
+        toothMarks = SessionId is int markSessionId ? await Sessions.GetToothMarksAsync(markSessionId) : [];
+        if (toothMarks.Count == 0) ParseTeethField();
+        deciduousChart = toothMarks.Any(m => m.ToothNumber / 10 >= 5);
+        SyncTeethText();
         loading = false;
     }
 
@@ -378,11 +437,13 @@ else
             if (IsNew)
             {
                 var created = await Sessions.CreateAsync(model);
+                await Sessions.ReplaceToothMarksAsync(created.Id, toothMarks);
                 Nav.NavigateTo($"sessions/{created.Id}", replace: true);
             }
             else
             {
                 await Sessions.UpdateAsync(model);
+                await Sessions.ReplaceToothMarksAsync(model.Id, toothMarks);
                 savedMessage = true;
             }
         }
@@ -395,6 +456,69 @@ else
             saving = false;
         }
     }
+
+    private void OnToothTap(int tooth)
+    {
+        chartTooth = tooth;
+        chartDraftPart = toothMarks.FirstOrDefault(m => m.ToothNumber == tooth)?.Part;
+        chartModalOpen = true;
+    }
+
+    private bool chartToothMarked => chartTooth is int t && toothMarks.Any(m => m.ToothNumber == t);
+    private string? chartToothProcedure => chartTooth is int t
+        ? toothMarks.FirstOrDefault(m => m.ToothNumber == t)?.Procedure
+        : null;
+
+    /// <summary>Applies the procedure picked in the popup to the tapped tooth. Null = mark without a procedure.</summary>
+    private void ChooseToothProcedure(string? procedure)
+    {
+        if (chartTooth is not int tooth) return;
+        var existing = toothMarks.FirstOrDefault(m => m.ToothNumber == tooth);
+        var part = procedure is null ? null : chartDraftPart;
+        if (existing is null)
+            toothMarks.Add(new ToothMark { SessionId = model.Id, ToothNumber = tooth, Procedure = procedure, Part = part });
+        else
+        {
+            existing.Procedure = procedure;
+            existing.Part = part;
+        }
+        SyncTeethText();
+        chartModalOpen = false;
+        chartTooth = null;
+    }
+
+    private void RemoveToothMark()
+    {
+        if (chartTooth is not int tooth) return;
+        var existing = toothMarks.FirstOrDefault(m => m.ToothNumber == tooth);
+        if (existing is not null) toothMarks.Remove(existing);
+        SyncTeethText();
+        chartModalOpen = false;
+        chartTooth = null;
+    }
+
+    /// <summary>Imports tooth numbers from the free-text Teeth field when no marks are stored yet.</summary>
+    private void ParseTeethField()
+    {
+        if (string.IsNullOrWhiteSpace(model.Teeth)) return;
+        foreach (var part in model.Teeth.Split(',', ';', ' '))
+        {
+            if (int.TryParse(part.Trim(), out var n) && IsValidFdi(n) && toothMarks.All(m => m.ToothNumber != n))
+                toothMarks.Add(new ToothMark { SessionId = model.Id, ToothNumber = n });
+        }
+        toothMarks.Sort((a, b) => a.ToothNumber.CompareTo(b.ToothNumber));
+    }
+
+    /// <summary>FDI: permanent teeth are 11-18/21-28/31-38/41-48, deciduous are x1-x5/x6-x8 with 5 teeth per quadrant.</summary>
+    private static bool IsValidFdi(int n) =>
+        n is >= 11 and <= 85 && n % 10 is >= 1 and <= 8 && n / 10 is >= 1 and <= 8
+        && (n / 10 <= 4 || n % 10 <= 5);
+
+    /// <summary>Keeps the legacy "Teeth" text field in sync with the chart marks.</summary>
+    private void SyncTeethText() =>
+        model.Teeth = toothMarks.Count == 0
+            ? null
+            : string.Join(", ", toothMarks.OrderBy(m => m.ToothNumber).Select(m => m.ToothNumber));
 
     private async Task AddMedicationAsync()
     {
